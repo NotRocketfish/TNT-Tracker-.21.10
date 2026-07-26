@@ -102,8 +102,6 @@ public class TntTrackerMod implements ClientModInitializer {
 
 			MatrixStack matrices = context.matrixStack();
 			Camera camera = context.camera();
-			Tessellator tessellator = Tessellator.getInstance();
-			BufferBuilder buffer = tessellator.getBuffer();
 
 			matrices.push();
 			matrices.translate(-camera.getPos().x, -camera.getPos().y, -camera.getPos().z);
@@ -115,6 +113,9 @@ public class TntTrackerMod implements ClientModInitializer {
 
 			// Advance replay tick
 			ReplayEngine.advanceTick();
+
+			// ====== EINEN EINZIGEN VertexConsumer für ALLE Linien besorgen ======
+			VertexConsumer consumer = Objects.requireNonNull(context.consumers()).getBuffer(RenderLayer.getLines());
 
 			// Draw trails
 			if (ModConfig.showTrails) {
@@ -138,7 +139,6 @@ public class TntTrackerMod implements ClientModInitializer {
 						}
 
 						// Hitboxes
-						buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 						for (int i = 0; i < drawCount; i++) {
 							Vec3d point = trail.get(i).pos();
 							boolean isDuplicate = false;
@@ -155,14 +155,15 @@ public class TntTrackerMod implements ClientModInitializer {
 							Box exactBox = new Box(point.x - size, point.y, point.z - size,
 									point.x + size, point.y + size * 2, point.z + size);
 							float t = (float) i / Math.max(1, drawCount - 1);
-							WorldRenderer.drawBox(matrices, buffer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
+							// JETZT MIT consumer STATT buffer
+							WorldRenderer.drawBox(matrices, consumer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
 						}
-						tessellator.draw();
+						// KEIN tessellator.draw() mehr!
 
-						// Tick labels
+						// Tick labels – unverändert, da sie über den TextRenderer laufen
 						Set<Long> labeledTicks = new HashSet<>();
 						Map<Integer, Long> salveStarts = computeSalveStartTicks();
-						long startTick = salveStarts.getOrDefault(trailIdx, trail.get(0).tick());   // <-- einmalig pro Trail
+						long startTick = salveStarts.getOrDefault(trailIdx, trail.get(0).tick());
 
 						for (int i = 0; i < drawCount; i++) {
 							TimedPosition tp = trail.get(i);
@@ -192,7 +193,7 @@ public class TntTrackerMod implements ClientModInitializer {
 							int g = (int)(255 * color);
 							int argb = ((int)(255 * globalAlpha) << 24) | (r << 16) | (g << 8);
 
-							long relativeTick = tick - startTick;    // startTick ist jetzt der Salven-Start (oder Fallback)
+							long relativeTick = tick - startTick;
 							String label = "T+" + relativeTick;
 							client.textRenderer.draw(label,
 									-client.textRenderer.getWidth(label) / 2f, 0,
@@ -203,8 +204,7 @@ public class TntTrackerMod implements ClientModInitializer {
 							matrices.pop();
 						}
 
-						// Axis-aligned steps
-						buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
+						// Axis-aligned steps – JETZT MIT consumer
 						for (int i = 0; i < drawCount - 1; i++) {
 							Vec3d from = trail.get(i).pos();
 							Vec3d to = trail.get(i + 1).pos();
@@ -252,36 +252,35 @@ public class TntTrackerMod implements ClientModInitializer {
 									case "Z" -> { next = new Vec3d(current.x, current.y, to.z); move = dz; }
 								}
 								if (Math.abs(move) > 0.001) {
-									buffer.vertex(matrices.peek().getPositionMatrix(),
+									consumer.vertex(matrices.peek().getPositionMatrix(),
 													(float) current.x, (float) current.y, (float) current.z)
 											.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
-									buffer.vertex(matrices.peek().getPositionMatrix(),
+									consumer.vertex(matrices.peek().getPositionMatrix(),
 													(float) next.x, (float) next.y, (float) next.z)
 											.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
 								}
 								current = next;
 							}
 						}
-						tessellator.draw();
+						// Kein tessellator.draw()!
 
-						// Explosion marker
+						// Explosion marker – JETZT MIT consumer
 						if (drawCount > 0) {
 							Vec3d exp = trail.get(drawCount - 1).pos();
 							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
 							float size = (float) ModConfig.explosionXSize;
-							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							tessellator.draw();
+
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
 						}
 
-						// Replay white box
+						// Replay white box – JETZT MIT consumer
 						if (isReplay && ReplayEngine.replayTick < trail.size()) {
 							Vec3d currentPos = trail.get(ReplayEngine.replayTick).pos();
 							float boxSize = 0.6f;
@@ -289,9 +288,8 @@ public class TntTrackerMod implements ClientModInitializer {
 									currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
 									currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
 							);
-							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
-							WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
-							tessellator.draw();
+
+							WorldRenderer.drawBox(matrices, consumer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
 
 							matrices.push();
 							matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
@@ -312,31 +310,28 @@ public class TntTrackerMod implements ClientModInitializer {
 						for (int i = 0; i < drawCount; i++) positions.add(trail.get(i).pos());
 
 						if (!positions.isEmpty()) {
-							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 							for (int i = 0; i < positions.size() - 1; i++) {
 								Vec3d p1 = positions.get(i), p2 = positions.get(i + 1);
 								float t = (float) i / Math.max(1, positions.size() - 1);
-								buffer.vertex(matrices.peek().getPositionMatrix(),
+								consumer.vertex(matrices.peek().getPositionMatrix(),
 										(float) p1.x, (float) p1.y, (float) p1.z).color(t, 1.0f - t, 0.0f, globalAlpha).next();
-								buffer.vertex(matrices.peek().getPositionMatrix(),
+								consumer.vertex(matrices.peek().getPositionMatrix(),
 										(float) p2.x, (float) p2.y, (float) p2.z).color(t, 1.0f - t, 0.0f, globalAlpha).next();
 							}
-							tessellator.draw();
 
 							// Explosion marker
 							Vec3d exp = positions.get(positions.size() - 1);
 							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
 							float size = (float) ModConfig.explosionXSize;
-							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							tessellator.draw();
+
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
 
 							// Replay white box
 							if (isReplay && ReplayEngine.replayTick < trail.size()) {
@@ -346,9 +341,8 @@ public class TntTrackerMod implements ClientModInitializer {
 										currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
 										currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
 								);
-								buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
-								WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
-								tessellator.draw();
+
+								WorldRenderer.drawBox(matrices, consumer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
 
 								matrices.push();
 								matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
@@ -368,19 +362,17 @@ public class TntTrackerMod implements ClientModInitializer {
 				}
 			}
 
-			// Live red boxes
+			// Live red boxes – JETZT MIT consumer
 			if (ModConfig.showTntPositions) {
-				buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 				synchronized (TntTracker.activeRecordings) {
 					for (net.minecraft.entity.TntEntity tnt : TntTracker.activeRecordings.keySet()) {
 						if (tnt.isRemoved()) continue;
 						double x = tnt.getX(), y = tnt.getY(), z = tnt.getZ();
 						float size = 0.98f;
 						Box box = new Box(x - size/2, y, z - size/2, x + size/2, y + size, z + size/2);
-						WorldRenderer.drawBox(matrices, buffer, box, 1.0f, 0.0f, 0.0f, 1.0f);
+						WorldRenderer.drawBox(matrices, consumer, box, 1.0f, 0.0f, 0.0f, 1.0f);
 					}
 				}
-				tessellator.draw();
 			}
 
 			matrices.pop();
