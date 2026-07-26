@@ -138,7 +138,7 @@ public class TntTrackerMod implements ClientModInitializer {
 						}
 
 						// Hitboxes
-						buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+						buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 						for (int i = 0; i < drawCount; i++) {
 							Vec3d point = trail.get(i).pos();
 							boolean isDuplicate = false;
@@ -204,7 +204,7 @@ public class TntTrackerMod implements ClientModInitializer {
 						}
 
 						// Axis-aligned steps
-						buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+						buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 						for (int i = 0; i < drawCount - 1; i++) {
 							Vec3d from = trail.get(i).pos();
 							Vec3d to = trail.get(i + 1).pos();
@@ -269,7 +269,7 @@ public class TntTrackerMod implements ClientModInitializer {
 							Vec3d exp = trail.get(drawCount - 1).pos();
 							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
 							float size = (float) ModConfig.explosionXSize;
-							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
 							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
 							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
@@ -289,7 +289,7 @@ public class TntTrackerMod implements ClientModInitializer {
 									currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
 									currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
 							);
-							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 							WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
 							tessellator.draw();
 
@@ -312,7 +312,7 @@ public class TntTrackerMod implements ClientModInitializer {
 						for (int i = 0; i < drawCount; i++) positions.add(trail.get(i).pos());
 
 						if (!positions.isEmpty()) {
-							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 							for (int i = 0; i < positions.size() - 1; i++) {
 								Vec3d p1 = positions.get(i), p2 = positions.get(i + 1);
 								float t = (float) i / Math.max(1, positions.size() - 1);
@@ -327,7 +327,7 @@ public class TntTrackerMod implements ClientModInitializer {
 							Vec3d exp = positions.get(positions.size() - 1);
 							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
 							float size = (float) ModConfig.explosionXSize;
-							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
 							buffer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
 							buffer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
@@ -346,7 +346,7 @@ public class TntTrackerMod implements ClientModInitializer {
 										currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
 										currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
 								);
-								buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+								buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 								WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
 								tessellator.draw();
 
@@ -370,7 +370,7 @@ public class TntTrackerMod implements ClientModInitializer {
 
 			// Live red boxes
 			if (ModConfig.showTntPositions) {
-				buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+				buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 				synchronized (TntTracker.activeRecordings) {
 					for (net.minecraft.entity.TntEntity tnt : TntTracker.activeRecordings.keySet()) {
 						if (tnt.isRemoved()) continue;
