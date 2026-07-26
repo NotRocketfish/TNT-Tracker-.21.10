@@ -158,7 +158,6 @@ public class TntTrackerMod implements ClientModInitializer {
 							// JETZT MIT consumer STATT buffer
 							WorldRenderer.drawBox(matrices, consumer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
 						}
-						// KEIN tessellator.draw() mehr!
 
 						// Tick labels – unverändert, da sie über den TextRenderer laufen
 						Set<Long> labeledTicks = new HashSet<>();
@@ -262,7 +261,6 @@ public class TntTrackerMod implements ClientModInitializer {
 								current = next;
 							}
 						}
-						// Kein tessellator.draw()!
 
 						// Explosion marker – JETZT MIT consumer
 						if (drawCount > 0) {
@@ -270,14 +268,16 @@ public class TntTrackerMod implements ClientModInitializer {
 							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
 							float size = (float) ModConfig.explosionXSize;
 
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+							consumer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+							consumer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							consumer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
 						}
 
 						// Replay white box – JETZT MIT consumer
@@ -362,7 +362,7 @@ public class TntTrackerMod implements ClientModInitializer {
 				}
 			}
 
-			// Live red boxes – JETZT MIT consumer
+			// Live red boxes
 			if (ModConfig.showTntPositions) {
 				synchronized (TntTracker.activeRecordings) {
 					for (net.minecraft.entity.TntEntity tnt : TntTracker.activeRecordings.keySet()) {
