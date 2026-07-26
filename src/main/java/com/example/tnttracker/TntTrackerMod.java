@@ -4,6 +4,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.example.tnttracker.config.ModConfig;
 import com.example.tnttracker.item.ModItems;
 import com.example.tnttracker.network.ClientTriggerPacket;
+import com.mojang.blaze3d.systems.VertexSorter;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -16,6 +17,8 @@ import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.render.*;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.entity.TntEntity;
+import net.minecraft.item.ItemGroups;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
@@ -38,6 +41,8 @@ public class TntTrackerMod implements ClientModInitializer {
 
 	private static boolean scrollCallbackRegistered = false;
 
+	public static boolean SODIUM_DETECTED = false;
+
 	// HUD dragging
 	private static int hudX = 5, hudY = 5;
 	private static boolean draggingHud = false;
@@ -56,6 +61,8 @@ public class TntTrackerMod implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		SODIUM_DETECTED = FabricLoader.getInstance().isModLoaded("sodium");
+
 		KeybindManager.register();
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -111,227 +118,174 @@ public class TntTrackerMod implements ClientModInitializer {
 			RenderSystem.defaultBlendFunc();
 			RenderSystem.setShader(GameRenderer::getPositionColorProgram);
 
-			// Advance replay tick
 			ReplayEngine.advanceTick();
 
-			// ====== EINEN EINZIGEN VertexConsumer für ALLE Linien besorgen ======
-			VertexConsumer consumer = Objects.requireNonNull(context.consumers()).getBuffer(RenderLayer.getLines());
+			boolean sodium = TntTrackerMod.SODIUM_DETECTED;
 
-			// Draw trails
-			if (ModConfig.showTrails) {
-				for (int trailIdx = 0; trailIdx < TntTracker.savedTrails.size(); trailIdx++) {
-					List<TimedPosition> trail = TntTracker.savedTrails.get(trailIdx);
-					if (trail.isEmpty()) continue;
+			// --- Sodium‑Zweig: Direkt in den VertexConsumer zeichnen ---
+            Tessellator tessellator = Tessellator.getInstance();
+            BufferBuilder buffer = tessellator.getBuffer();
+            if (sodium) {
+                buffer.begin(VertexFormat.DrawMode.LINES, VertexFormats.POSITION_COLOR);
 
-					boolean isReplay = ModConfig.replayActive &&
-							trailIdx >= ModConfig.replayTrailStart &&
-							trailIdx <= ModConfig.replayTrailEnd;
-					int drawCount = isReplay ? Math.min(ReplayEngine.replayTick + 1, trail.size()) : trail.size();
-					float globalAlpha = isReplay ? 1.0f : (ModConfig.replayActive ? 0.2f : 1.0f);
+				// Draw trails
+				if (ModConfig.showTrails) {
+					for (int trailIdx = 0; trailIdx < TntTracker.savedTrails.size(); trailIdx++) {
+						List<TimedPosition> trail = TntTracker.savedTrails.get(trailIdx);
+						if (trail.isEmpty()) continue;
 
-					// --- DOTS MODE ---
-					if (ModConfig.renderTrailAsDots) {
-						if (!isReplay && trail.size() > 1) {
-							Vec3d first = trail.get(0).pos();
-							Vec3d last = trail.get(trail.size() - 1).pos();
-							if (first.squaredDistanceTo(last) < ModConfig.groupingDistance * ModConfig.groupingDistance)
-								continue;
-						}
+						boolean isReplay = ModConfig.replayActive &&
+								trailIdx >= ModConfig.replayTrailStart &&
+								trailIdx <= ModConfig.replayTrailEnd;
+						int drawCount = isReplay ? Math.min(ReplayEngine.replayTick + 1, trail.size()) : trail.size();
+						float globalAlpha = isReplay ? 1.0f : (ModConfig.replayActive ? 0.2f : 1.0f);
 
-						// Hitboxes
-						for (int i = 0; i < drawCount; i++) {
-							Vec3d point = trail.get(i).pos();
-							boolean isDuplicate = false;
-							for (int j = 0; j < i; j++) {
-								if (point.squaredDistanceTo(trail.get(j).pos()) <
-										ModConfig.groupingDistance * ModConfig.groupingDistance) {
-									isDuplicate = true;
-									break;
-								}
-							}
-							if (isDuplicate) continue;
-
-							float size = 0.49f;
-							Box exactBox = new Box(point.x - size, point.y, point.z - size,
-									point.x + size, point.y + size * 2, point.z + size);
-							float t = (float) i / Math.max(1, drawCount - 1);
-							// JETZT MIT consumer STATT buffer
-							WorldRenderer.drawBox(matrices, consumer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
-						}
-
-						// Tick labels – unverändert, da sie über den TextRenderer laufen
-						Set<Long> labeledTicks = new HashSet<>();
-						Map<Integer, Long> salveStarts = computeSalveStartTicks();
-						long startTick = salveStarts.getOrDefault(trailIdx, trail.get(0).tick());
-
-						for (int i = 0; i < drawCount; i++) {
-							TimedPosition tp = trail.get(i);
-							Vec3d point = tp.pos();
-							long tick = tp.tick();
-
-							if (!labeledTicks.add(tick)) continue;
-							boolean isDuplicate = false;
-							for (int j = 0; j < i; j++) {
-								TimedPosition earlier = trail.get(j);
-								if (point.squaredDistanceTo(earlier.pos()) <
-										ModConfig.groupingDistance * ModConfig.groupingDistance) {
-									isDuplicate = true;
-									break;
-								}
-							}
-							if (isDuplicate) continue;
-
-							matrices.push();
-							matrices.translate(point.x, point.y + 1.5, point.z);
-							matrices.multiply(client.gameRenderer.getCamera().getRotation());
-							matrices.scale(-0.025f, -0.025f, 0.025f);
-
-							Matrix4f matrix4f = matrices.peek().getPositionMatrix();
-							float color = 1.0f - ((float) i / Math.max(1, drawCount - 1));
-							int r = (int)(255 * (1.0f - color));
-							int g = (int)(255 * color);
-							int argb = ((int)(255 * globalAlpha) << 24) | (r << 16) | (g << 8);
-
-							long relativeTick = tick - startTick;
-							String label = "T+" + relativeTick;
-							client.textRenderer.draw(label,
-									-client.textRenderer.getWidth(label) / 2f, 0,
-									argb, false, matrix4f,
-									client.getBufferBuilders().getEntityVertexConsumers(),
-									TextRenderer.TextLayerType.NORMAL, 0, 15728880);
-
-							matrices.pop();
-						}
-
-						// Axis-aligned steps – JETZT MIT consumer
-						for (int i = 0; i < drawCount - 1; i++) {
-							Vec3d from = trail.get(i).pos();
-							Vec3d to = trail.get(i + 1).pos();
-							if (from.squaredDistanceTo(to) < 0.0001) continue;
-
-							double dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
-							String[] order;
-							float[][] colors;
-
-							switch (ModConfig.drawOrder) {
-								case XYZ -> {
-									order = new String[]{"X", "Y", "Z"};
-									colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
-								}
-								case XZY -> {
-									order = new String[]{"X", "Z", "Y"};
-									colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
-								}
-								case YXZ -> {
-									order = new String[]{"Y", "X", "Z"};
-									colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
-								}
-								case YZX -> {
-									order = new String[]{"Y", "Z", "X"};
-									colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
-								}
-								case ZXY -> {
-									order = new String[]{"Z", "X", "Y"};
-									colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
-								}
-								case ZYX -> {
-									order = new String[]{"Z", "Y", "X"};
-									colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
-								}
-								default -> throw new IllegalStateException("Unexpected draw order: " + ModConfig.drawOrder);
+						// --- DOTS MODE ---
+						if (ModConfig.renderTrailAsDots) {
+							if (!isReplay && trail.size() > 1) {
+								Vec3d first = trail.get(0).pos();
+								Vec3d last = trail.get(trail.size() - 1).pos();
+								if (first.squaredDistanceTo(last) < ModConfig.groupingDistance * ModConfig.groupingDistance)
+									continue;
 							}
 
-							Vec3d current = from;
-							for (int j = 0; j < 3; j++) {
-								Vec3d next = current;
-								double move = 0;
-								switch (order[j]) {
-									case "X" -> { next = new Vec3d(to.x, current.y, current.z); move = dx; }
-									case "Y" -> { next = new Vec3d(current.x, to.y, current.z); move = dy; }
-									case "Z" -> { next = new Vec3d(current.x, current.y, to.z); move = dz; }
+							// Hitboxes
+							for (int i = 0; i < drawCount; i++) {
+								Vec3d point = trail.get(i).pos();
+								boolean isDuplicate = false;
+								for (int j = 0; j < i; j++) {
+									if (point.squaredDistanceTo(trail.get(j).pos()) <
+											ModConfig.groupingDistance * ModConfig.groupingDistance) {
+										isDuplicate = true;
+										break;
+									}
 								}
-								if (Math.abs(move) > 0.001) {
-									consumer.vertex(matrices.peek().getPositionMatrix(),
-													(float) current.x, (float) current.y, (float) current.z)
-											.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
-									consumer.vertex(matrices.peek().getPositionMatrix(),
-													(float) next.x, (float) next.y, (float) next.z)
-											.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
-								}
-								current = next;
+								if (isDuplicate) continue;
+
+								float size = 0.49f;
+								Box exactBox = new Box(point.x - size, point.y, point.z - size,
+										point.x + size, point.y + size * 2, point.z + size);
+								float t = (float) i / Math.max(1, drawCount - 1);
+								WorldRenderer.drawBox(matrices, buffer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
 							}
-						}
 
-						// Explosion marker – JETZT MIT consumer
-						if (drawCount > 0) {
-							Vec3d exp = trail.get(drawCount - 1).pos();
-							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
-							float size = (float) ModConfig.explosionXSize;
+							// Tick labels (wie gehabt)
+							Set<Long> labeledTicks = new HashSet<>();
+							Map<Integer, Long> salveStarts = computeSalveStartTicks();
+							long startTick = salveStarts.getOrDefault(trailIdx, trail.get(0).tick());
 
-							Matrix4f matrix = matrices.peek().getPositionMatrix();
+							for (int i = 0; i < drawCount; i++) {
+								TimedPosition tp = trail.get(i);
+								Vec3d point = tp.pos();
+								long tick = tp.tick();
 
-							consumer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-						}
+								if (!labeledTicks.add(tick)) continue;
+								boolean isDuplicate = false;
+								for (int j = 0; j < i; j++) {
+									TimedPosition earlier = trail.get(j);
+									if (point.squaredDistanceTo(earlier.pos()) <
+											ModConfig.groupingDistance * ModConfig.groupingDistance) {
+										isDuplicate = true;
+										break;
+									}
+								}
+								if (isDuplicate) continue;
 
-						// Replay white box – JETZT MIT consumer
-						if (isReplay && ReplayEngine.replayTick < trail.size()) {
-							Vec3d currentPos = trail.get(ReplayEngine.replayTick).pos();
-							float boxSize = 0.6f;
-							Box currentBox = new Box(
-									currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
-									currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
-							);
+								matrices.push();
+								matrices.translate(point.x, point.y + 1.5, point.z);
+								matrices.multiply(client.gameRenderer.getCamera().getRotation());
+								matrices.scale(-0.025f, -0.025f, 0.025f);
 
-							WorldRenderer.drawBox(matrices, consumer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
+								Matrix4f matrix4f = matrices.peek().getPositionMatrix();
+								float color = 1.0f - ((float) i / Math.max(1, drawCount - 1));
+								int r = (int)(255 * (1.0f - color));
+								int g = (int)(255 * color);
+								int argb = ((int)(255 * globalAlpha) << 24) | (r << 16) | (g << 8);
 
-							matrices.push();
-							matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
-							matrices.multiply(client.gameRenderer.getCamera().getRotation());
-							matrices.scale(-0.025f, -0.025f, 0.025f);
-							Matrix4f matrix4f = matrices.peek().getPositionMatrix();
-							String trailLabel = "#" + (trailIdx + 1);
-							client.textRenderer.draw(trailLabel,
-									-client.textRenderer.getWidth(trailLabel) / 2f, 0,
-									0xFFFFFFFF, false, matrix4f,
-									client.getBufferBuilders().getEntityVertexConsumers(),
-									TextRenderer.TextLayerType.NORMAL, 0, 15728880);
-							matrices.pop();
-						}
+								long relativeTick = tick - startTick;
+								String label = "T+" + relativeTick;
+								client.textRenderer.draw(label,
+										-client.textRenderer.getWidth(label) / 2f, 0,
+										argb, false, matrix4f,
+										client.getBufferBuilders().getEntityVertexConsumers(),
+										TextRenderer.TextLayerType.NORMAL, 0, 15728880);
 
-					} else { // LINES MODE
-						List<Vec3d> positions = new ArrayList<>();
-						for (int i = 0; i < drawCount; i++) positions.add(trail.get(i).pos());
+								matrices.pop();
+							}
 
-						if (!positions.isEmpty()) {
-							for (int i = 0; i < positions.size() - 1; i++) {
-								Vec3d p1 = positions.get(i), p2 = positions.get(i + 1);
-								float t = (float) i / Math.max(1, positions.size() - 1);
-								consumer.vertex(matrices.peek().getPositionMatrix(),
-										(float) p1.x, (float) p1.y, (float) p1.z).color(t, 1.0f - t, 0.0f, globalAlpha).next();
-								consumer.vertex(matrices.peek().getPositionMatrix(),
-										(float) p2.x, (float) p2.y, (float) p2.z).color(t, 1.0f - t, 0.0f, globalAlpha).next();
+							// Axis-aligned steps
+							for (int i = 0; i < drawCount - 1; i++) {
+								Vec3d from = trail.get(i).pos();
+								Vec3d to = trail.get(i + 1).pos();
+								if (from.squaredDistanceTo(to) < 0.0001) continue;
+
+								double dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+								String[] order;
+								float[][] colors;
+
+								switch (ModConfig.drawOrder) {
+									case XYZ -> {
+										order = new String[]{"X", "Y", "Z"};
+										colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
+									}
+									case XZY -> {
+										order = new String[]{"X", "Z", "Y"};
+										colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
+									}
+									case YXZ -> {
+										order = new String[]{"Y", "X", "Z"};
+										colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
+									}
+									case YZX -> {
+										order = new String[]{"Y", "Z", "X"};
+										colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
+									}
+									case ZXY -> {
+										order = new String[]{"Z", "X", "Y"};
+										colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
+									}
+									case ZYX -> {
+										order = new String[]{"Z", "Y", "X"};
+										colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
+									}
+									default -> throw new IllegalStateException("Unexpected draw order: " + ModConfig.drawOrder);
+								}
+
+								Vec3d current = from;
+								for (int j = 0; j < 3; j++) {
+									Vec3d next = current;
+									double move = 0;
+									switch (order[j]) {
+										case "X" -> { next = new Vec3d(to.x, current.y, current.z); move = dx; }
+										case "Y" -> { next = new Vec3d(current.x, to.y, current.z); move = dy; }
+										case "Z" -> { next = new Vec3d(current.x, current.y, to.z); move = dz; }
+									}
+									if (Math.abs(move) > 0.001) {
+										buffer.vertex(matrices.peek().getPositionMatrix(), (float) current.x, (float) current.y, (float) current.z)
+												.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
+										buffer.vertex(matrices.peek().getPositionMatrix(), (float) next.x, (float) next.y, (float) next.z)
+												.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
+									}
+									current = next;
+								}
 							}
 
 							// Explosion marker
-							Vec3d exp = positions.get(positions.size() - 1);
-							float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
-							float size = (float) ModConfig.explosionXSize;
+							if (drawCount > 0) {
+								Vec3d exp = trail.get(drawCount - 1).pos();
+								float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
+								float size = (float) ModConfig.explosionXSize;
+								Matrix4f matrix = matrices.peek().getPositionMatrix();
 
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
-							consumer.vertex(matrices.peek().getPositionMatrix(), x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+							}
 
 							// Replay white box
 							if (isReplay && ReplayEngine.replayTick < trail.size()) {
@@ -339,10 +293,8 @@ public class TntTrackerMod implements ClientModInitializer {
 								float boxSize = 0.6f;
 								Box currentBox = new Box(
 										currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
-										currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2
-								);
-
-								WorldRenderer.drawBox(matrices, consumer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
+										currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2);
+								WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
 
 								matrices.push();
 								matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
@@ -357,21 +309,357 @@ public class TntTrackerMod implements ClientModInitializer {
 										TextRenderer.TextLayerType.NORMAL, 0, 15728880);
 								matrices.pop();
 							}
+
+						} else { // LINES MODE
+							List<Vec3d> positions = new ArrayList<>();
+							for (int i = 0; i < drawCount; i++) positions.add(trail.get(i).pos());
+
+							if (!positions.isEmpty()) {
+								for (int i = 0; i < positions.size() - 1; i++) {
+									Vec3d p1 = positions.get(i), p2 = positions.get(i + 1);
+									float t = (float) i / Math.max(1, positions.size() - 1);
+									buffer.vertex(matrices.peek().getPositionMatrix(), (float) p1.x, (float) p1.y, (float) p1.z)
+											.color(t, 1.0f - t, 0.0f, globalAlpha).next();
+									buffer.vertex(matrices.peek().getPositionMatrix(), (float) p2.x, (float) p2.y, (float) p2.z)
+											.color(t, 1.0f - t, 0.0f, globalAlpha).next();
+								}
+
+								// Explosion marker
+								Vec3d exp = positions.get(positions.size() - 1);
+								float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
+								float size = (float) ModConfig.explosionXSize;
+								Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+								buffer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+
+								// Replay white box
+								if (isReplay && ReplayEngine.replayTick < trail.size()) {
+									Vec3d currentPos = trail.get(ReplayEngine.replayTick).pos();
+									float boxSize = 0.6f;
+									Box currentBox = new Box(
+											currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
+											currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2);
+									WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
+
+									matrices.push();
+									matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
+									matrices.multiply(client.gameRenderer.getCamera().getRotation());
+									matrices.scale(-0.025f, -0.025f, 0.025f);
+									Matrix4f matrix4f = matrices.peek().getPositionMatrix();
+									String trailLabel = "#" + (trailIdx + 1);
+									client.textRenderer.draw(trailLabel,
+											-client.textRenderer.getWidth(trailLabel) / 2f, 0,
+											0xFFFFFFFF, false, matrix4f,
+											client.getBufferBuilders().getEntityVertexConsumers(),
+											TextRenderer.TextLayerType.NORMAL, 0, 15728880);
+									matrices.pop();
+								}
+							}
 						}
 					}
 				}
-			}
 
-			// Live red boxes
-			if (ModConfig.showTntPositions) {
-				synchronized (TntTracker.activeRecordings) {
-					for (net.minecraft.entity.TntEntity tnt : TntTracker.activeRecordings.keySet()) {
-						if (tnt.isRemoved()) continue;
-						double x = tnt.getX(), y = tnt.getY(), z = tnt.getZ();
-						float size = 0.98f;
-						Box box = new Box(x - size/2, y, z - size/2, x + size/2, y + size, z + size/2);
-						WorldRenderer.drawBox(matrices, consumer, box, 1.0f, 0.0f, 0.0f, 1.0f);
+				// Live red boxes
+				if (ModConfig.showTntPositions) {
+					synchronized (TntTracker.activeRecordings) {
+						for (TntEntity tnt : TntTracker.activeRecordings.keySet()) {
+							if (tnt.isRemoved()) continue;
+							double x = tnt.getX(), y = tnt.getY(), z = tnt.getZ();
+							float size = 0.98f;
+							Box box = new Box(x - size/2, y, z - size/2, x + size/2, y + size, z + size/2);
+							WorldRenderer.drawBox(matrices, buffer, box, 1.0f, 0.0f, 0.0f, 1.0f);
+						}
 					}
+				}
+
+				RenderSystem.disableDepthTest();
+				RenderSystem.enableBlend();
+				RenderSystem.defaultBlendFunc();
+				RenderSystem.depthMask(false);
+
+                RenderSystem.polygonOffset(-1.0f, -1.0f);
+				RenderSystem.enablePolygonOffset();
+
+				RenderLayer.getLines().draw(buffer, VertexSorter.BY_DISTANCE);
+
+				RenderSystem.disablePolygonOffset();
+			} else {
+				// ========== Vanilla‑Pfad (DEBUG_LINES, genau wie vorher) ==========
+
+                // Draw trails
+				if (ModConfig.showTrails) {
+					for (int trailIdx = 0; trailIdx < TntTracker.savedTrails.size(); trailIdx++) {
+						List<TimedPosition> trail = TntTracker.savedTrails.get(trailIdx);
+						if (trail.isEmpty()) continue;
+
+						boolean isReplay = ModConfig.replayActive &&
+								trailIdx >= ModConfig.replayTrailStart &&
+								trailIdx <= ModConfig.replayTrailEnd;
+						int drawCount = isReplay ? Math.min(ReplayEngine.replayTick + 1, trail.size()) : trail.size();
+						float globalAlpha = isReplay ? 1.0f : (ModConfig.replayActive ? 0.2f : 1.0f);
+
+						// --- DOTS MODE ---
+						if (ModConfig.renderTrailAsDots) {
+							if (!isReplay && trail.size() > 1) {
+								Vec3d first = trail.get(0).pos();
+								Vec3d last = trail.get(trail.size() - 1).pos();
+								if (first.squaredDistanceTo(last) < ModConfig.groupingDistance * ModConfig.groupingDistance)
+									continue;
+							}
+
+							// Hitboxes
+							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							for (int i = 0; i < drawCount; i++) {
+								Vec3d point = trail.get(i).pos();
+								boolean isDuplicate = false;
+								for (int j = 0; j < i; j++) {
+									if (point.squaredDistanceTo(trail.get(j).pos()) <
+											ModConfig.groupingDistance * ModConfig.groupingDistance) {
+										isDuplicate = true;
+										break;
+									}
+								}
+								if (isDuplicate) continue;
+
+								float size = 0.49f;
+								Box exactBox = new Box(point.x - size, point.y, point.z - size,
+										point.x + size, point.y + size * 2, point.z + size);
+								float t = (float) i / Math.max(1, drawCount - 1);
+								WorldRenderer.drawBox(matrices, buffer, exactBox, t, 1.0f - t, 0.0f, globalAlpha);
+							}
+							tessellator.draw();
+
+							// Tick labels (genau wie im Original)
+							Set<Long> labeledTicks = new HashSet<>();
+							Map<Integer, Long> salveStarts = computeSalveStartTicks();
+							long startTick = salveStarts.getOrDefault(trailIdx, trail.get(0).tick());
+
+							for (int i = 0; i < drawCount; i++) {
+								TimedPosition tp = trail.get(i);
+								Vec3d point = tp.pos();
+								long tick = tp.tick();
+
+								if (!labeledTicks.add(tick)) continue;
+								boolean isDuplicate = false;
+								for (int j = 0; j < i; j++) {
+									TimedPosition earlier = trail.get(j);
+									if (point.squaredDistanceTo(earlier.pos()) <
+											ModConfig.groupingDistance * ModConfig.groupingDistance) {
+										isDuplicate = true;
+										break;
+									}
+								}
+								if (isDuplicate) continue;
+
+								matrices.push();
+								matrices.translate(point.x, point.y + 1.5, point.z);
+								matrices.multiply(client.gameRenderer.getCamera().getRotation());
+								matrices.scale(-0.025f, -0.025f, 0.025f);
+
+								Matrix4f matrix4f = matrices.peek().getPositionMatrix();
+								float color = 1.0f - ((float) i / Math.max(1, drawCount - 1));
+								int r = (int)(255 * (1.0f - color));
+								int g = (int)(255 * color);
+								int argb = ((int)(255 * globalAlpha) << 24) | (r << 16) | (g << 8);
+
+								long relativeTick = tick - startTick;
+								String label = "T+" + relativeTick;
+								client.textRenderer.draw(label,
+										-client.textRenderer.getWidth(label) / 2f, 0,
+										argb, false, matrix4f,
+										client.getBufferBuilders().getEntityVertexConsumers(),
+										TextRenderer.TextLayerType.NORMAL, 0, 15728880);
+
+								matrices.pop();
+							}
+
+							// Axis-aligned steps
+							buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+							for (int i = 0; i < drawCount - 1; i++) {
+								Vec3d from = trail.get(i).pos();
+								Vec3d to = trail.get(i + 1).pos();
+								if (from.squaredDistanceTo(to) < 0.0001) continue;
+
+								double dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+								String[] order;
+								float[][] colors;
+
+								switch (ModConfig.drawOrder) {
+									case XYZ -> {
+										order = new String[]{"X", "Y", "Z"};
+										colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
+									}
+									case XZY -> {
+										order = new String[]{"X", "Z", "Y"};
+										colors = new float[][]{{1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
+									}
+									case YXZ -> {
+										order = new String[]{"Y", "X", "Z"};
+										colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}};
+									}
+									case YZX -> {
+										order = new String[]{"Y", "Z", "X"};
+										colors = new float[][]{{0f,1f,0f,0.8f*globalAlpha}, {0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
+									}
+									case ZXY -> {
+										order = new String[]{"Z", "X", "Y"};
+										colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}};
+									}
+									case ZYX -> {
+										order = new String[]{"Z", "Y", "X"};
+										colors = new float[][]{{0f,0f,1f,0.8f*globalAlpha}, {0f,1f,0f,0.8f*globalAlpha}, {1f,0f,0f,0.8f*globalAlpha}};
+									}
+									default -> throw new IllegalStateException("Unexpected draw order: " + ModConfig.drawOrder);
+								}
+
+								Vec3d current = from;
+								for (int j = 0; j < 3; j++) {
+									Vec3d next = current;
+									double move = 0;
+									switch (order[j]) {
+										case "X" -> { next = new Vec3d(to.x, current.y, current.z); move = dx; }
+										case "Y" -> { next = new Vec3d(current.x, to.y, current.z); move = dy; }
+										case "Z" -> { next = new Vec3d(current.x, current.y, to.z); move = dz; }
+									}
+									if (Math.abs(move) > 0.001) {
+										buffer.vertex(matrices.peek().getPositionMatrix(), (float) current.x, (float) current.y, (float) current.z)
+												.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
+										buffer.vertex(matrices.peek().getPositionMatrix(), (float) next.x, (float) next.y, (float) next.z)
+												.color(colors[j][0], colors[j][1], colors[j][2], colors[j][3]).next();
+									}
+									current = next;
+								}
+							}
+							tessellator.draw();
+
+							// Explosion marker
+							if (drawCount > 0) {
+								buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+								Vec3d exp = trail.get(drawCount - 1).pos();
+								float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
+								float size = (float) ModConfig.explosionXSize;
+								Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+								buffer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								tessellator.draw();
+							}
+
+							// Replay white box
+							if (isReplay && ReplayEngine.replayTick < trail.size()) {
+								buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+								Vec3d currentPos = trail.get(ReplayEngine.replayTick).pos();
+								float boxSize = 0.6f;
+								Box currentBox = new Box(
+										currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
+										currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2);
+								WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
+								tessellator.draw();
+
+								matrices.push();
+								matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
+								matrices.multiply(client.gameRenderer.getCamera().getRotation());
+								matrices.scale(-0.025f, -0.025f, 0.025f);
+								Matrix4f matrix4f = matrices.peek().getPositionMatrix();
+								String trailLabel = "#" + (trailIdx + 1);
+								client.textRenderer.draw(trailLabel,
+										-client.textRenderer.getWidth(trailLabel) / 2f, 0,
+										0xFFFFFFFF, false, matrix4f,
+										client.getBufferBuilders().getEntityVertexConsumers(),
+										TextRenderer.TextLayerType.NORMAL, 0, 15728880);
+								matrices.pop();
+							}
+
+						} else { // LINES MODE
+							List<Vec3d> positions = new ArrayList<>();
+							for (int i = 0; i < drawCount; i++) positions.add(trail.get(i).pos());
+
+							if (!positions.isEmpty()) {
+								buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+								for (int i = 0; i < positions.size() - 1; i++) {
+									Vec3d p1 = positions.get(i), p2 = positions.get(i + 1);
+									float t = (float) i / Math.max(1, positions.size() - 1);
+									buffer.vertex(matrices.peek().getPositionMatrix(), (float) p1.x, (float) p1.y, (float) p1.z)
+											.color(t, 1.0f - t, 0.0f, globalAlpha).next();
+									buffer.vertex(matrices.peek().getPositionMatrix(), (float) p2.x, (float) p2.y, (float) p2.z)
+											.color(t, 1.0f - t, 0.0f, globalAlpha).next();
+								}
+								tessellator.draw();
+
+								// Explosion marker
+								buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+								Vec3d exp = positions.get(positions.size() - 1);
+								float x = (float) exp.x, y = (float) exp.y, z = (float) exp.z;
+								float size = (float) ModConfig.explosionXSize;
+								Matrix4f matrix = matrices.peek().getPositionMatrix();
+
+								buffer.vertex(matrix, x - size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y + size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x + size, y - size, z).color(1f,0f,0f,globalAlpha).next();
+								buffer.vertex(matrix, x - size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x - size, y, z + size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								buffer.vertex(matrix, x + size, y, z - size).color(1f,0.3f,0f,globalAlpha*0.8f).next();
+								tessellator.draw();
+
+								// Replay white box
+								if (isReplay && ReplayEngine.replayTick < trail.size()) {
+									buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+									Vec3d currentPos = trail.get(ReplayEngine.replayTick).pos();
+									float boxSize = 0.6f;
+									Box currentBox = new Box(
+											currentPos.x - boxSize/2, currentPos.y, currentPos.z - boxSize/2,
+											currentPos.x + boxSize/2, currentPos.y + boxSize, currentPos.z + boxSize/2);
+									WorldRenderer.drawBox(matrices, buffer, currentBox, 1.0f, 1.0f, 1.0f, 1.0f);
+									tessellator.draw();
+
+									matrices.push();
+									matrices.translate(currentPos.x, currentPos.y + boxSize + 0.3, currentPos.z);
+									matrices.multiply(client.gameRenderer.getCamera().getRotation());
+									matrices.scale(-0.025f, -0.025f, 0.025f);
+									Matrix4f matrix4f = matrices.peek().getPositionMatrix();
+									String trailLabel = "#" + (trailIdx + 1);
+									client.textRenderer.draw(trailLabel,
+											-client.textRenderer.getWidth(trailLabel) / 2f, 0,
+											0xFFFFFFFF, false, matrix4f,
+											client.getBufferBuilders().getEntityVertexConsumers(),
+											TextRenderer.TextLayerType.NORMAL, 0, 15728880);
+									matrices.pop();
+								}
+							}
+						}
+					}
+				}
+
+				// Live red boxes
+				if (ModConfig.showTntPositions) {
+					buffer.begin(VertexFormat.DrawMode.DEBUG_LINES, VertexFormats.POSITION_COLOR);
+
+					synchronized (TntTracker.activeRecordings) {
+						for (net.minecraft.entity.TntEntity tnt : TntTracker.activeRecordings.keySet()) {
+							if (tnt.isRemoved()) continue;
+							double x = tnt.getX(), y = tnt.getY(), z = tnt.getZ();
+							float size = 0.98f;
+							Box box = new Box(x - size/2, y, z - size/2, x + size/2, y + size, z + size/2);
+							WorldRenderer.drawBox(matrices, buffer, box, 1.0f, 0.0f, 0.0f, 1.0f);
+						}
+					}
+
+					tessellator.draw();
 				}
 			}
 
@@ -506,7 +794,7 @@ public class TntTrackerMod implements ClientModInitializer {
 
 		// Items
 		ModItems.register();
-		ItemGroupEvents.modifyEntriesEvent(net.minecraft.item.ItemGroups.REDSTONE)
+		ItemGroupEvents.modifyEntriesEvent(ItemGroups.REDSTONE)
 				.register(content -> content.add(ModItems.REMOTE_TRIGGER));
 
 		ClientTriggerPacket.register();
@@ -531,26 +819,26 @@ public class TntTrackerMod implements ClientModInitializer {
 		};
 		String rec = ModConfig.drawOrder == ModConfig.DrawOrder.YZX ? " (rec)" : "";
 
-        return new String[][]{
-                { Text.translatable("tnttracker.hud.label.tracking").getString(),
-                        ModConfig.showTntPositions ? stateOn : stateOff,
-                        ModConfig.showTntPositions ? "#55FF55" : "#FF5555" },
-                { Text.translatable("tnttracker.hud.label.mode").getString(),
-                        ModConfig.renderTrailAsDots ? dots : linesStr,
-                        ModConfig.renderTrailAsDots ? "#FFFF55" : "#55FFFF" },
-                { Text.translatable("tnttracker.hud.label.safe").getString(),
-                        ModConfig.safeMode ? stateOn : stateOff,
-                        ModConfig.safeMode ? "#55FF55" : "#FF5555" },
-                { Text.translatable("tnttracker.hud.label.respawn").getString(),
-                        ModConfig.respawnTnt ? stateOn : stateOff,
-                        ModConfig.respawnTnt ? "#55FF55" : "#FF5555" },
-                { Text.translatable("tnttracker.hud.label.group").getString(),
-                        String.format("%.2f", ModConfig.groupingDistance),
-                        "#FFFFFF" },
-                { Text.translatable("tnttracker.hud.label.order").getString(),
-                        orderName + rec,
-                        ModConfig.drawOrder == ModConfig.DrawOrder.YZX ? "#55FF55" : "#AAAAAA" }
-        };
+		return new String[][]{
+				{ Text.translatable("tnttracker.hud.label.tracking").getString(),
+						ModConfig.showTntPositions ? stateOn : stateOff,
+						ModConfig.showTntPositions ? "#55FF55" : "#FF5555" },
+				{ Text.translatable("tnttracker.hud.label.mode").getString(),
+						ModConfig.renderTrailAsDots ? dots : linesStr,
+						ModConfig.renderTrailAsDots ? "#FFFF55" : "#55FFFF" },
+				{ Text.translatable("tnttracker.hud.label.safe").getString(),
+						ModConfig.safeMode ? stateOn : stateOff,
+						ModConfig.safeMode ? "#55FF55" : "#FF5555" },
+				{ Text.translatable("tnttracker.hud.label.respawn").getString(),
+						ModConfig.respawnTnt ? stateOn : stateOff,
+						ModConfig.respawnTnt ? "#55FF55" : "#FF5555" },
+				{ Text.translatable("tnttracker.hud.label.group").getString(),
+						String.format("%.2f", ModConfig.groupingDistance),
+						"#FFFFFF" },
+				{ Text.translatable("tnttracker.hud.label.order").getString(),
+						orderName + rec,
+						ModConfig.drawOrder == ModConfig.DrawOrder.YZX ? "#55FF55" : "#AAAAAA" }
+		};
 	}
 
 	public static void exportTrailsToFile() {
