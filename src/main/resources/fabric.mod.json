@@ -8,8 +8,8 @@
 		"Pepino16"
 	],
 	"contact": {
-		"homepage": "https://modrinth.com/mod/tnttracker",
-		"sources": "https://github.com/deinname/tnttracker"
+		"homepage": "https://modrinth.com/mod/tnt-tracker",
+		"sources": "https://github.com/Peppino16/TNT-Tracker"
 	},
 	"license": "MIT",
 	"environment": "*",
@@ -24,12 +24,5 @@
 	"depends": {
 		"fabric-api": ">=0.91.2",
 		"minecraft": ">=1.20.4"
-	},
-	"custom": {
-		"modmenu": {
-			"links": {
-				"modmenu.modrinth": "https://modrinth.com/mod/tnttracker"
-			}
-		}
 	}
 }
