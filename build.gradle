@@ -1,5 +1,5 @@
 plugins {
-	id 'fabric-loom' version '1.6.5'
+	id 'fabric-loom' version "${loom_version}"
 	id 'maven-publish'
 }
 
@@ -7,18 +7,15 @@ version = project.mod_version
 group = project.maven_group
 
 repositories {
-	maven { url "https://maven.shedaniel.me/" }
-	maven { url "https://api.modrinth.com/maven" }   // ← Hier hin
+	maven { url "https://api.modrinth.com/maven" }
 }
 
 dependencies {
-	minecraft "com.mojang:minecraft:1.20.4"
-	mappings "net.fabricmc:yarn:1.20.4+build.3:v2"
-	modImplementation "net.fabricmc:fabric-loader:0.15.7"
-	modImplementation "net.fabricmc.fabric-api:fabric-api:0.91.2+1.20.4"
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	modRuntimeOnly "maven.modrinth:sodium:mc1.20.4-0.5.8"
-
-	modApi "me.shedaniel.cloth:cloth-config-fabric:13.0.138"
 }
 
 processResources {
@@ -32,6 +29,7 @@ processResources {
 
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 17
+	it.options.encoding = "UTF-8"
 }
 
 java {
@@ -55,8 +53,4 @@ publishing {
 			from components.java
 		}
 	}
-	// Das hier brauchst du nur, wenn du auf Modrinth publishen willst
-	// repositories {
-	//     maven { url "https://api.modrinth.com/maven" }
-	// }
 }

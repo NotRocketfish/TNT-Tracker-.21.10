@@ -1,6 +1,7 @@
 package com.example.tnttracker.mixin;
 
 import com.example.tnttracker.config.ModConfig;
+import net.minecraft.entity.TntEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.damage.DamageTypes;
@@ -14,8 +15,9 @@ public class LivingEntityMixin {
 
     @Inject(method = "damage", at = @At("HEAD"), cancellable = true)
     private void cancelExplosionDamage(DamageSource source, float amount, CallbackInfoReturnable<Boolean> cir) {
-        // Check if the damage is from an explosion using the registry key
-        if (ModConfig.safeMode && source.getTypeRegistryEntry().matchesKey(DamageTypes.EXPLOSION)) {
+        if (ModConfig.safeMode &&
+                source.getTypeRegistryEntry().matchesKey(DamageTypes.EXPLOSION) &&
+                source.getSource() instanceof TntEntity) {
             cir.setReturnValue(false);
         }
     }

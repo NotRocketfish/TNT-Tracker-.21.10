@@ -18,8 +18,27 @@ public class ModConfig {
     public static int salveGroupingTicks = 40;
 
     // --- Draw order ---
+    public enum Axis {
+        X, Y, Z
+    }
+
     public enum DrawOrder {
-        YZX, XYZ, ZYX, YXZ, ZXY, XZY
+        YZX(Axis.Y, Axis.Z, Axis.X),
+        XYZ(Axis.X, Axis.Y, Axis.Z),
+        ZYX(Axis.Z, Axis.Y, Axis.X),
+        YXZ(Axis.Y, Axis.X, Axis.Z),
+        ZXY(Axis.Z, Axis.X, Axis.Y),
+        XZY(Axis.X, Axis.Z, Axis.Y);
+
+        private final Axis[] axes;
+
+        DrawOrder(Axis first, Axis second, Axis third) {
+            this.axes = new Axis[]{first, second, third};
+        }
+
+        public Axis[] axes() {
+            return axes;
+        }
     }
     public static DrawOrder drawOrder = DrawOrder.YZX;
 

@@ -1,9 +1,10 @@
 {
 	"schemaVersion": 1,
 	"id": "tnttracker",
-	"version": "1.0.0",
+	"version": "${version}",
 	"name": "TNT Tracker",
 	"description": "Records and shows TNT trajectories, counts destroyed blocks, and provides a replay function.",
+	"icon": "assets/tnttracker/icon.png",
 	"authors": [
 		"Pepino16"
 	],
@@ -14,6 +15,9 @@
 	"license": "MIT",
 	"environment": "*",
 	"entrypoints": {
+		"main": [
+			"com.example.tnttracker.TntTrackerCommon"
+		],
 		"client": [
 			"com.example.tnttracker.TntTrackerMod"
 		]
@@ -22,7 +26,9 @@
 		"tnttracker.mixins.json"
 	],
 	"depends": {
+		"fabricloader": ">=0.15.7",
 		"fabric-api": ">=0.91.2",
-		"minecraft": ">=1.20.4"
+		"minecraft": "~1.20.4",
+		"java": ">=17"
 	}
 }

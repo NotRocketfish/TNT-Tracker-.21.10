@@ -56,7 +56,7 @@ public class KeybindManager {
     }
 
     public static void handlePresses(MinecraftClient client) {
-        // Hilfsfunktion für AN/AUS mit Farbe
+        // Reusable colored states.
         Text stateOn  = Text.translatable("tnttracker.state.on").formatted(Formatting.GREEN);
         Text stateOff = Text.translatable("tnttracker.state.off").formatted(Formatting.RED);
 
@@ -112,7 +112,7 @@ public class KeybindManager {
             ReplayEngine.toggleReplay(client);
         }
 
-        // Neue ungebundene Toggles
+        // Extra unbound toggles.
         while (toggleShowTrailsKey.wasPressed()) {
             ModConfig.showTrails = !ModConfig.showTrails;
             if (client.player != null)

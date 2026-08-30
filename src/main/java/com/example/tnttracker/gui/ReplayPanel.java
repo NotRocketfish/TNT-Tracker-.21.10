@@ -3,9 +3,11 @@ package com.example.tnttracker.gui;
 import com.example.tnttracker.ReplayEngine;
 import com.example.tnttracker.TntTrackerMod;
 import com.example.tnttracker.config.ModConfig;
+import net.minecraft.client.gui.Element;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
@@ -77,7 +79,7 @@ public class ReplayPanel extends Screen {
         if (mouseX >= btnX && mouseX <= btnX + btnWidth && mouseY >= startY + 112 && mouseY <= startY + 112 + btnHeight)
             return Text.translatable("tnttracker.replay.tooltip_export").getString();
 
-        // ← Settings
+        // Settings
         if (mouseX >= btnX && mouseX <= btnX + btnWidth && mouseY >= startY + 130 && mouseY <= startY + 130 + btnHeight)
             return Text.translatable("tnttracker.replay.tooltip_back").getString();
 
@@ -109,7 +111,7 @@ public class ReplayPanel extends Screen {
         int labelWidth = 40;
         int spacing = 0;
 
-        // Hilfstexte für AN/AUS
+        // Reusable colored states.
         Text stateOn  = Text.translatable("tnttracker.state.on").formatted(Formatting.GREEN);
         Text stateOff = Text.translatable("tnttracker.state.off").formatted(Formatting.RED);
 
@@ -246,7 +248,7 @@ public class ReplayPanel extends Screen {
 
     @Override public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {}
     @Override public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Background and border (same as before)
+        // Background and border.
         context.fill(x + 2, y + 2, x + WINDOW_WIDTH + 2, y + WINDOW_HEIGHT + 2, 0x88000000);
         context.fill(x, y, x + WINDOW_WIDTH, y + WINDOW_HEIGHT, 0xCC222222);
         int white = 0xFFFFFFFF;
@@ -256,15 +258,15 @@ public class ReplayPanel extends Screen {
         context.drawVerticalLine(x + WINDOW_WIDTH - 1, y, y + WINDOW_HEIGHT - 1, white);
         context.drawCenteredTextWithShadow(textRenderer, title, x + WINDOW_WIDTH / 2, y + 6, 0xFFFFFF);
 
-        // Draw buttons and widgets first
+        // Render child widgets before tooltip.
         super.render(context, mouseX, mouseY, delta);
 
-        // --- Tooltip drawn LAST with high Z level ---
+        // Draw tooltip last so it appears above the overlay.
         String tooltip = getTooltipForPosition(mouseX, mouseY);
         if (tooltip != null) {
             MatrixStack matrices = context.getMatrices();
             matrices.push();
-            matrices.translate(0, 0, 400.0f);   // render on top of everything
+            matrices.translate(0, 0, 400.0f);
 
             int bgColor = 0xEE222222;
             int borderColor = 0xFFFFFFFF;
@@ -311,15 +313,7 @@ public class ReplayPanel extends Screen {
 
     @Override public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (dragging) {
-            x = (int) (mouseX - dragOffsetX);
-            y = (int) (mouseY - dragOffsetY);
-
-            // Clamp to keep the entire window on screen
-            x = Math.max(0, Math.min(x, width - WINDOW_WIDTH));
-            y = Math.max(0, Math.min(y, height - WINDOW_HEIGHT));
-
-            lastX = x; lastY = y;
-            clearChildren(); init();
+            moveWindowTo((int) (mouseX - dragOffsetX), (int) (mouseY - dragOffsetY));
             return true;
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
@@ -347,4 +341,27 @@ public class ReplayPanel extends Screen {
     }
 
     @Override public boolean shouldPause() { return false; }
+
+    private void moveWindowTo(int newX, int newY) {
+        newX = Math.max(0, Math.min(newX, width - WINDOW_WIDTH));
+        newY = Math.max(0, Math.min(newY, height - WINDOW_HEIGHT));
+
+        int dx = newX - x;
+        int dy = newY - y;
+        if (dx == 0 && dy == 0) {
+            return;
+        }
+
+        x = newX;
+        y = newY;
+        lastX = x;
+        lastY = y;
+
+        for (Element child : children()) {
+            if (child instanceof ClickableWidget widget) {
+                widget.setX(widget.getX() + dx);
+                widget.setY(widget.getY() + dy);
+            }
+        }
+    }
 }

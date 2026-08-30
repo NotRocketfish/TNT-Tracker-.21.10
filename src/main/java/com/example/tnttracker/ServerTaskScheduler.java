@@ -1,40 +1,39 @@
 package com.example.tnttracker;
 
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.minecraft.registry.RegistryKey;
 import net.minecraft.world.World;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 public class ServerTaskScheduler {
-    private static final Map<String, DelayedTask> tasks = new ConcurrentHashMap<>();
+    private static final List<DelayedTask> tasks = new ArrayList<>();
 
     public static void schedule(World world, int delayTicks, Runnable task) {
-        String key = world.getRegistryKey().getValue().toString() + ":" + System.nanoTime();
-        tasks.put(key, new DelayedTask(delayTicks, task));
+        long executeAtTick = world.getTime() + Math.max(0, delayTicks);
+        tasks.add(new DelayedTask(world.getRegistryKey(), executeAtTick, task));
     }
 
     public static void register() {
-        ServerTickEvents.END_WORLD_TICK.register(world -> tasks.entrySet().removeIf(entry -> {
-            DelayedTask dt = entry.getValue();
-            dt.remaining.decrementAndGet();
-            if (dt.remaining.get() <= 0) {
-                dt.task.run();
-                return true;
+        ServerTickEvents.END_WORLD_TICK.register(world -> {
+            List<Runnable> dueTasks = new ArrayList<>();
+            Iterator<DelayedTask> iterator = tasks.iterator();
+            while (iterator.hasNext()) {
+                DelayedTask delayedTask = iterator.next();
+                if (!delayedTask.worldKey.equals(world.getRegistryKey())) {
+                    continue;
+                }
+                if (world.getTime() >= delayedTask.executeAtTick) {
+                    dueTasks.add(delayedTask.task);
+                    iterator.remove();
+                }
             }
-            return false;
-        }));
+            dueTasks.forEach(Runnable::run);
+        });
     }
 
-    @SuppressWarnings("ClassCanBeRecord")
-    private static class DelayedTask {
-        final AtomicInteger remaining;
-        final Runnable task;
-
-        DelayedTask(int ticks, Runnable task) {
-            this.remaining = new AtomicInteger(ticks);
-            this.task = task;
-        }
+    private record DelayedTask(RegistryKey<World> worldKey, long executeAtTick, Runnable task) {
     }
 }

@@ -2,9 +2,10 @@ package com.example.tnttracker.gui;
 
 import com.example.tnttracker.TntTrackerMod;
 import com.example.tnttracker.config.ModConfig;
+import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
-
+import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -87,7 +88,7 @@ public class SettingsOverlay extends Screen {
             y = (height - WINDOW_HEIGHT) / 2;
         }
 
-        // Vorbereitete farbige Zustände
+        // Reusable colored states.
         Text stateOn  = Text.translatable("tnttracker.state.on").formatted(Formatting.GREEN);
         Text stateOff = Text.translatable("tnttracker.state.off").formatted(Formatting.RED);
         Text modeDots  = Text.translatable("tnttracker.state.dots").formatted(Formatting.YELLOW);
@@ -248,25 +249,24 @@ public class SettingsOverlay extends Screen {
         context.drawVerticalLine(x + WINDOW_WIDTH - 1, y, y + WINDOW_HEIGHT - 1, white);
         // Title
         context.drawCenteredTextWithShadow(textRenderer, title, x + WINDOW_WIDTH / 2, y + 6, 0xFFFFFF);
-        // Autor-Credit unten mittig
-        String credit = "TNT Tracker v1.0 by Pepino16";  // ← ersetze DeinName mit deinem Namen
-        int creditColor = 0x33AAAAAA; // dezentes Grau
+        String credit = "TNT Tracker v1.0 by Pepino16";
+        int creditColor = 0x33AAAAAA;
         context.drawCenteredTextWithShadow(
                 textRenderer,
                 Text.literal(credit),
                 x + WINDOW_WIDTH / 2,
-                y + WINDOW_HEIGHT - 10,    // 10 Pixel über dem unteren Rand
+                y + WINDOW_HEIGHT - 10,
                 creditColor
         );
-        // Draw buttons FIRST
+        // Render child widgets before tooltip.
         super.render(context, mouseX, mouseY, delta);
 
-        // --- Tooltip drawn LAST so it appears on top of everything ---
+        // Draw tooltip last so it appears above the overlay.
         String tooltip = getTooltipForPosition(mouseX, mouseY);
         if (tooltip != null) {
             MatrixStack matrices = context.getMatrices();
             matrices.push();
-            matrices.translate(0, 0, 400.0f);   // Draw on top of everything
+            matrices.translate(0, 0, 400.0f);
 
             int bgColor = 0xEE222222;
             int borderColor = 0xFFFFFFFF;
@@ -319,15 +319,7 @@ public class SettingsOverlay extends Screen {
 
     @Override public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (dragging) {
-            x = (int) (mouseX - dragOffsetX);
-            y = (int) (mouseY - dragOffsetY);
-
-            // Clamp to keep the entire window on screen
-            x = Math.max(0, Math.min(x, width - WINDOW_WIDTH));
-            y = Math.max(0, Math.min(y, height - WINDOW_HEIGHT));
-
-            lastX = x; lastY = y;
-            clearChildren(); init();
+            moveWindowTo((int) (mouseX - dragOffsetX), (int) (mouseY - dragOffsetY));
             return true;
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
@@ -339,4 +331,27 @@ public class SettingsOverlay extends Screen {
     }
 
     @Override public boolean shouldPause() { return false; }
+
+    private void moveWindowTo(int newX, int newY) {
+        newX = Math.max(0, Math.min(newX, width - WINDOW_WIDTH));
+        newY = Math.max(0, Math.min(newY, height - WINDOW_HEIGHT));
+
+        int dx = newX - x;
+        int dy = newY - y;
+        if (dx == 0 && dy == 0) {
+            return;
+        }
+
+        x = newX;
+        y = newY;
+        lastX = x;
+        lastY = y;
+
+        for (Element child : children()) {
+            if (child instanceof ClickableWidget widget) {
+                widget.setX(widget.getX() + dx);
+                widget.setY(widget.getY() + dy);
+            }
+        }
+    }
 }

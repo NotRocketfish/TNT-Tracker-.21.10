@@ -3,44 +3,74 @@ package com.example.tnttracker;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.TntEntity;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class TntTracker {
-    public static final Map<TntEntity, List<TntTrackerMod.TimedPosition>> activeRecordings =
-            Collections.synchronizedMap(new HashMap<>());
+    private static final int MAX_SAVED_TRAILS = 256;
+
+    public static final Map<Integer, List<TntTrackerMod.TimedPosition>> activeRecordings = new LinkedHashMap<>();
+    private static final Map<Integer, TntEntity> activeEntities = new LinkedHashMap<>();
     public static final List<List<TntTrackerMod.TimedPosition>> savedTrails = new ArrayList<>();
+    private static int trailsVersion = 0;
 
     public static void clearTrails() {
         savedTrails.clear();
+        trailsVersion++;
     }
 
-    public static void tick(Iterable<Entity> entities) {
-        // Neue TNT-Entitäten erfassen (Trail starten)
+    public static int getTrailsVersion() {
+        return trailsVersion;
+    }
+
+    public static Collection<TntEntity> getActiveTntEntities() {
+        return activeEntities.values();
+    }
+
+    public static void tick(Iterable<Entity> entities, long worldTime) {
+        Set<Integer> seen = new HashSet<>();
         for (Entity entity : entities) {
             if (entity instanceof TntEntity tnt && !tnt.isRemoved()) {
-                activeRecordings.computeIfAbsent(tnt, k -> Collections.synchronizedList(new ArrayList<>()));
+                int id = tnt.getId();
+                seen.add(id);
+                activeEntities.put(id, tnt);
+                activeRecordings
+                        .computeIfAbsent(id, ignored -> new ArrayList<>())
+                        .add(new TntTrackerMod.TimedPosition(tnt.getPos(), worldTime));
             }
         }
 
-        // Entfernte TNT-Entitäten erkennen und deren Pfad speichern
-        synchronized (activeRecordings) {
-            activeRecordings.entrySet().removeIf(entry -> {
-                if (entry.getKey().isRemoved()) {
-                    List<TntTrackerMod.TimedPosition> path = new ArrayList<>(entry.getValue());
-                    if (path.size() > 1) savedTrails.add(path);
-                    return true;
-                }
-                return false;
-            });
+        var it = activeRecordings.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Integer, List<TntTrackerMod.TimedPosition>> entry = it.next();
+            if (!seen.contains(entry.getKey())) {
+                saveTrail(entry.getValue());
+                activeEntities.remove(entry.getKey());
+                it.remove();
+            }
         }
     }
 
     public static void finalizeAllRecordings() {
-        synchronized (activeRecordings) {
-            for (List<TntTrackerMod.TimedPosition> path : activeRecordings.values()) {
-                if (path.size() > 1) savedTrails.add(new ArrayList<>(path));
-            }
-            activeRecordings.clear();
+        for (List<TntTrackerMod.TimedPosition> path : activeRecordings.values()) {
+            saveTrail(path);
         }
+        activeRecordings.clear();
+        activeEntities.clear();
+    }
+
+    private static void saveTrail(List<TntTrackerMod.TimedPosition> path) {
+        if (path.size() <= 1) return;
+
+        savedTrails.add(new ArrayList<>(path));
+        while (savedTrails.size() > MAX_SAVED_TRAILS) {
+            savedTrails.remove(0);
+        }
+        trailsVersion++;
     }
 }

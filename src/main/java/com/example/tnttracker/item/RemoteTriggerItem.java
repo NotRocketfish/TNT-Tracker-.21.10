@@ -1,11 +1,11 @@
 package com.example.tnttracker.item;
 
-import com.example.tnttracker.network.ClientTriggerPacket;
 import net.minecraft.client.item.TooltipContext;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
@@ -34,9 +34,9 @@ public class RemoteTriggerItem extends Item {
         ItemStack stack = context.getStack();
         BlockPos pos = context.getBlockPos();
 
-        if (!world.isClient) return ActionResult.SUCCESS;
+        if (world.isClient) return ActionResult.SUCCESS;
 
-        saveBoundPos(stack, pos);
+        saveBoundPos(stack, pos, world);
         player.sendMessage(
                 Text.translatable("tnttracker.item.remote_trigger.bound", pos.toShortString())
                         .formatted(Formatting.GREEN),
@@ -54,7 +54,7 @@ public class RemoteTriggerItem extends Item {
             return TypedActionResult.pass(stack);
         }
 
-        if (!world.isClient) return TypedActionResult.success(stack);
+        if (world.isClient) return TypedActionResult.success(stack);
 
         BlockPos bound = getBoundPos(stack);
         if (bound == null) {
@@ -66,13 +66,22 @@ public class RemoteTriggerItem extends Item {
             return TypedActionResult.fail(stack);
         }
 
-        ClientTriggerPacket.send(bound);
+        if (player instanceof ServerPlayerEntity serverPlayer &&
+                RemoteTriggerActions.trigger(serverPlayer, hand, bound, getBoundDimension(stack))) {
+            player.sendMessage(
+                    Text.translatable("tnttracker.item.remote_trigger.triggered", bound.toShortString())
+                            .formatted(Formatting.GREEN),
+                    true
+            );
+            return TypedActionResult.success(stack);
+        }
+
         player.sendMessage(
-                Text.translatable("tnttracker.item.remote_trigger.triggered", bound.toShortString())
-                        .formatted(Formatting.GREEN),
+                Text.translatable("tnttracker.item.remote_trigger.no_bound")
+                        .formatted(Formatting.RED),
                 true
         );
-        return TypedActionResult.success(stack);
+        return TypedActionResult.fail(stack);
     }
 
     @Override
@@ -95,22 +104,30 @@ public class RemoteTriggerItem extends Item {
         }
     }
 
-    private static void saveBoundPos(ItemStack stack, BlockPos pos) {
+    private static void saveBoundPos(ItemStack stack, BlockPos pos, World world) {
         NbtCompound nbt = stack.getOrCreateNbt();
         nbt.putInt("boundX", pos.getX());
         nbt.putInt("boundY", pos.getY());
         nbt.putInt("boundZ", pos.getZ());
+        nbt.putString("boundDimension", world.getRegistryKey().getValue().toString());
         stack.setNbt(nbt);
     }
 
     public static BlockPos getBoundPos(ItemStack stack) {
         if (stack.isEmpty() || !stack.hasNbt()) return null;
         NbtCompound nbt = stack.getNbt();
-        if (nbt == null || !nbt.contains("boundX")) return null;
+        if (nbt == null || !nbt.contains("boundX") || !nbt.contains("boundY") || !nbt.contains("boundZ")) return null;
         return new BlockPos(
                 nbt.getInt("boundX"),
                 nbt.getInt("boundY"),
                 nbt.getInt("boundZ")
         );
+    }
+
+    public static String getBoundDimension(ItemStack stack) {
+        if (stack.isEmpty() || !stack.hasNbt()) return null;
+        NbtCompound nbt = stack.getNbt();
+        if (nbt == null || !nbt.contains("boundDimension")) return null;
+        return nbt.getString("boundDimension");
     }
 }
